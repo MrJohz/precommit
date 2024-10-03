@@ -1,0 +1,12 @@
+[package]
+name = "precommit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.89"
+bstr = "1.10.0"
+futures = "0.3.30"
+git2 = "0.19.0"
+lexopt = "0.3.0"
+smol = "2.0.2"
