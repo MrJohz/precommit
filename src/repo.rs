@@ -1,10 +1,13 @@
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf};
 
 use git2::{Delta, Oid, Repository};
 
-use crate::errors::Error;
+use crate::{errors::Error, World};
 
-pub fn fetch_changed_paths(repo: &Repository) -> Result<Vec<(PathBuf, Oid)>, Error> {
+pub fn fetch_changed_paths(
+    repo: &Repository,
+    world: &mut World<impl Write, impl Write>,
+) -> Result<Vec<(PathBuf, Oid)>, Error> {
     let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let diff = repo.diff_tree_to_index(head.as_ref(), None, None)?;
 
@@ -16,7 +19,10 @@ pub fn fetch_changed_paths(repo: &Repository) -> Result<Vec<(PathBuf, Oid)>, Err
             match delta.new_file().path() {
                 Some(path) => Some((path.to_owned(), oid)),
                 None => {
-                    eprintln!("Could not find a path for object {oid}, ignoring");
+                    let _ = writeln!(
+                        world.stderr,
+                        "Could not find a path for object {oid}, ignoring"
+                    );
                     None
                 }
             }

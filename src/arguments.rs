@@ -20,9 +20,9 @@ pub enum Mode {
     Diff(OsString),
 }
 
-fn try_parse_args() -> Result<Action, lexopt::Error> {
+fn try_parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Action, lexopt::Error> {
     use lexopt::prelude::*;
-    let mut parser = lexopt::Parser::from_env();
+    let mut parser = lexopt::Parser::from_iter(args);
 
     match parser.next()? {
         Some(Value(cmd)) if cmd == "list" => Ok(Action::ListFiles(parse_list_files(&mut parser)?)),
@@ -77,8 +77,8 @@ fn parse_check(parser: &mut lexopt::Parser) -> Result<Check, lexopt::Error> {
     })
 }
 
-pub fn parse_args() -> Action {
-    match try_parse_args() {
+pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Action {
+    match try_parse_args(args) {
         Ok(args) => args,
         Err(err) => {
             dbg!(err);

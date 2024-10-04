@@ -1,16 +1,25 @@
-use std::{io::Write, path::Path};
+use std::io::Write;
 
-use crate::{arguments::Action, errors::Error, repo::fetch_changed_paths};
+use crate::{arguments::Action, errors::Error, repo::fetch_changed_paths, world::World};
 
-pub fn run(
-    action: Action,
-    cwd: &impl AsRef<Path>,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-) -> i32 {
-    match try_run(action, cwd, stdout, stderr) {
+pub fn run(action: Action, world: &mut World<impl Write, impl Write>) -> i32 {
+    match try_run(action, world) {
         Ok(status) => status,
-        Err(err) => panic!("{1}: {:?}", err, "better error handling is need, pronto!"),
+        Err(Error::GitError(error)) => {
+            writeln!(
+                world.stderr,
+                "An git operation failed unexpectedly (class {2:?}, code {1:?}): {0} ",
+                error.message(),
+                error.code(),
+                error.class()
+            )
+            .unwrap();
+            50
+        }
+        Err(Error::WriteError(error)) => {
+            writeln!(world.stderr, "Unable to perform IO: {:?}", error).unwrap();
+            51
+        }
     }
 
     // let arguments = dbg!(arguments::parse());
@@ -35,20 +44,16 @@ pub fn run(
     // Ok(())
 }
 
-fn try_run(
-    action: Action,
-    cwd: &impl AsRef<Path>,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-) -> Result<i32, Error> {
-    let cwd = cwd.as_ref();
-    let repo = git2::Repository::open(cwd)?;
+fn try_run(action: Action, world: &mut World<impl Write, impl Write>) -> Result<i32, Error> {
+    let repo = git2::Repository::open(dbg!(&world.cwd))?;
 
     match action {
         Action::ListFiles(()) => {
-            for file in fetch_changed_paths(&repo)? {
-                stdout.write_all(file.0.as_os_str().as_encoded_bytes())?;
-                stdout.write_all(b"\n")?;
+            for file in fetch_changed_paths(&repo, world)? {
+                world
+                    .stdout
+                    .write_all(file.0.as_os_str().as_encoded_bytes())?;
+                world.stdout.write_all(b"\n")?;
             }
         }
         Action::Check(validate) => {
