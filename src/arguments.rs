@@ -20,7 +20,7 @@ pub enum Mode {
     Diff(OsString),
 }
 
-fn parse_args() -> Result<Action, lexopt::Error> {
+fn try_parse_args() -> Result<Action, lexopt::Error> {
     use lexopt::prelude::*;
     let mut parser = lexopt::Parser::from_env();
 
@@ -30,7 +30,7 @@ fn parse_args() -> Result<Action, lexopt::Error> {
         Some(Value(cmd)) => Err(format!("Unexpected command {}", cmd.to_string_lossy()))?,
         Some(Short(arg)) => Err(format!("Unexpected argument -{arg} (expecting a command)"))?,
         Some(Long(arg)) => Err(format!("Unexpected argument --{arg} (expecting a command)"))?,
-        None => Err(format!("Command 'list' or 'check' must be provided"))?,
+        None => Err("Command 'list' or 'check' must be provided".to_string())?,
     }
 }
 
@@ -77,8 +77,8 @@ fn parse_check(parser: &mut lexopt::Parser) -> Result<Check, lexopt::Error> {
     })
 }
 
-pub fn parse() -> Action {
-    match parse_args() {
+pub fn parse_args() -> Action {
+    match try_parse_args() {
         Ok(args) => args,
         Err(err) => {
             dbg!(err);
