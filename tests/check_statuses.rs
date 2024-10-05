@@ -160,3 +160,55 @@ fn if_multiple_commands_fail_all_the_command_outputs_are_shown() {
         .stderr_contains("message 1")
         .stderr_contains("message 2");
 }
+
+#[test]
+fn if_multiple_files_fail_all_the_command_outputs_are_shown() {
+    let (_handle, dir) = common::dir();
+
+    dir.git_init();
+
+    dir.file("test1", "contents");
+    dir.git_add("test1");
+    dir.file("test2", "contents");
+    dir.git_add("test2");
+
+    let subdir = dir.subdir("subdirectory");
+    subdir
+        .exec_self(["check", "-s", ">&2 echo 'error in file {}'; false"])
+        .is_failure(1)
+        .stderr_contains("error in file test1")
+        .stderr_contains("error in file test2");
+}
+
+#[test]
+fn stdout_is_never_printed_to_console() {
+    let (_handle, dir) = common::dir();
+
+    dir.git_init();
+
+    dir.file("test", "contents");
+    dir.git_add("test");
+
+    let subdir = dir.subdir("subdirectory");
+    subdir
+        .exec_self(["check", "-s", "echo 'print to stdout'; false"])
+        .is_failure(1)
+        .stderr_not_contains("print to stdout");
+}
+
+#[test]
+fn check_status_is_fed_the_file_in_the_index() {
+    let (_handle, dir) = common::dir();
+
+    dir.git_init();
+
+    dir.file("test", "contents");
+    dir.git_add("test");
+
+    let command = format!("cat > {:?}/output.log", dir.path());
+
+    dir.exec_self(["check", "-s", &command]).is_success();
+
+    let result = dir.read("output.log");
+    assert_eq!(result, "contents");
+}

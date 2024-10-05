@@ -44,6 +44,9 @@ fn try_run(action: Action, world: &mut World<impl Write, impl Write>) -> Result<
         &[] as &[&std::ffi::OsStr],
     )?;
 
+    // Open closest repository to the cwd, which may not actually be the cwd
+    // (e.g. if we are in a subdirectory of the repository).  In this case,
+    // update `world.cwd` as if we were running in the repository root.
     if let Some(path) = repo.workdir() {
         world.cwd = path.into();
     }

@@ -89,7 +89,16 @@ impl Expectations {
         }
 
         self.debug_output();
-        panic!("assertion failed (stderr did not contain {stderr:?}")
+        panic!("assertion failed (stderr did not contain {stderr:?})")
+    }
+
+    pub fn stderr_not_contains(&self, stderr: impl AsRef<[u8]> + Debug) -> &Self {
+        if !self.stderr.contains_str(stderr.as_ref()) {
+            return self;
+        }
+
+        self.debug_output();
+        panic!("assertion failed (stderr contained {stderr:?})")
     }
 }
 
