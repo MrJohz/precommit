@@ -1,11 +1,21 @@
 use std::io::Write;
 
-use crate::{arguments::Action, errors::Error, repo::fetch_changed_paths, world::World};
+use futures::{stream::FuturesUnordered, StreamExt};
+use git2::Repository;
+use smol::lock::Semaphore;
+
+use crate::{
+    arguments::{Action, Check},
+    check::process_file,
+    errors::Error,
+    repo::{fetch_changed_paths, read_oid},
+    world::World,
+};
 
 pub fn run(action: Action, world: &mut World<impl Write, impl Write>) -> i32 {
     match try_run(action, world) {
-        Ok(status) => status,
-        Err(Error::GitError(error)) => {
+        Ok(_) => 0,
+        Err(Error::Git(error)) => {
             writeln!(
                 world.stderr,
                 "An git operation failed unexpectedly (class {2:?}, code {1:?}): {0} ",
@@ -16,36 +26,19 @@ pub fn run(action: Action, world: &mut World<impl Write, impl Write>) -> i32 {
             .unwrap();
             50
         }
-        Err(Error::WriteError(error)) => {
+        Err(Error::Write(error)) => {
             writeln!(world.stderr, "Unable to perform IO: {:?}", error).unwrap();
             51
         }
+        Err(Error::ChecksFailed()) => {
+            writeln!(world.stderr, "One or more checks failed").unwrap();
+            1
+        }
     }
-
-    // let arguments = dbg!(arguments::parse());
-    // let repo = git2::Repository::open("/tmp/demo-git").unwrap();
-    // let head = repo.head().unwrap().peel_to_tree().unwrap();
-    // let diff = repo.diff_tree_to_index(Some(&head), None, None).unwrap();
-    // let deltas = diff
-    //     .deltas()
-    //     .filter(|diff| matches!(diff.status(), Delta::Added | Delta::Modified))
-    //     .map(|delta| BlobbedFile::new(&repo, delta));
-
-    // let semaphore = Semaphore::new(dbg!(arguments.max_processes));
-
-    // for file in deltas {
-    //     smol::block_on(async {
-    //         dbg!(validate_file(&semaphore, file.unwrap(), &arguments)
-    //             .await
-    //             .unwrap());
-    //     });
-    // }
-
-    // Ok(())
 }
 
-fn try_run(action: Action, world: &mut World<impl Write, impl Write>) -> Result<i32, Error> {
-    let repo = git2::Repository::open(dbg!(&world.cwd))?;
+fn try_run(action: Action, world: &mut World<impl Write, impl Write>) -> Result<(), Error> {
+    let repo = Repository::open(&world.cwd)?;
 
     match action {
         Action::ListFiles(()) => {
@@ -53,12 +46,63 @@ fn try_run(action: Action, world: &mut World<impl Write, impl Write>) -> Result<
                 world
                     .stdout
                     .write_all(file.0.as_os_str().as_encoded_bytes())?;
-                world.stdout.write_all(b"\n")?;
+                writeln!(world.stdout)?;
             }
+            Ok(())
         }
-        Action::Check(validate) => {
-            dbg!(validate);
-        }
+        Action::Check(check) => run_check(check, &repo, world),
     }
-    Ok(0)
+}
+
+fn run_check(
+    check: Check,
+    repo: &Repository,
+    world: &mut World<impl Write, impl Write>,
+) -> Result<(), Error> {
+    let files = fetch_changed_paths(repo, world)?
+        .into_iter()
+        .map(|(path, oid)| (path, read_oid(repo, oid, world)));
+
+    let semaphore = Semaphore::new(check.max_processes);
+
+    let failures = {
+        let mut futures = FuturesUnordered::new();
+
+        for (path, contents) in files {
+            futures.push(process_file(
+                &semaphore,
+                &check.placeholder,
+                path,
+                contents?,
+                &check.format_commands,
+                &check.validate_commands,
+            ));
+        }
+
+        let mut failures = 0;
+        smol::block_on(async {
+            while let Some((path, result)) = futures.next().await {
+                match result {
+                    Ok(()) => {}
+                    Err(errors) => {
+                        failures += 1;
+                        writeln!(world.stderr, "check(s) failed for path {path:?}")?;
+                        for error in errors {
+                            error.write_error_message(&mut world.stderr)?;
+                        }
+                        writeln!(world.stderr)?;
+                    }
+                }
+            }
+            Ok::<_, Error>(())
+        })?;
+
+        Ok::<_, Error>(failures)
+    }?;
+
+    if failures == 0 {
+        Ok(())
+    } else {
+        Err(Error::ChecksFailed())
+    }
 }

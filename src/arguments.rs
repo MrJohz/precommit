@@ -1,4 +1,9 @@
-use std::{ffi::OsString, num::NonZero, thread};
+use std::{
+    ffi::{OsStr, OsString},
+    num::NonZero,
+    path::Path,
+    thread,
+};
 
 #[derive(Debug)]
 pub enum Action {
@@ -18,6 +23,26 @@ pub struct Check {
 pub enum Mode {
     Status(OsString),
     Diff(OsString),
+}
+
+impl Mode {
+    pub fn command(&self, placeholder: &OsStr, path: &Path) -> OsString {
+        use bstr::ByteSlice;
+        // TODO: make this work for Windows as well
+        use std::os::unix::ffi::OsStringExt;
+
+        let command = match self {
+            Self::Status(command) => command,
+            Self::Diff(command) => command,
+        };
+
+        let command = command.as_encoded_bytes().replace(
+            placeholder.as_encoded_bytes(),
+            path.as_os_str().as_encoded_bytes(),
+        );
+
+        OsString::from_vec(command)
+    }
 }
 
 fn try_parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Action, lexopt::Error> {

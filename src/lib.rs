@@ -1,4 +1,5 @@
 pub mod arguments;
+mod check;
 mod errors;
 mod repo;
 mod run;

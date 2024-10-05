@@ -31,3 +31,12 @@ pub fn fetch_changed_paths(
 
     Ok(files)
 }
+
+pub fn read_oid(
+    repo: &Repository,
+    oid: Oid,
+    _: &mut World<impl Write, impl Write>,
+) -> Result<Vec<u8>, Error> {
+    let blob = repo.find_blob(oid)?;
+    Ok(blob.content().into())
+}

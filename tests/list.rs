@@ -4,7 +4,7 @@ mod common;
 fn listing_contents_of_a_non_git_project_produces_an_error() {
     let dir = common::dir();
 
-    dir.exec_self(["list"]).is_failure(50);
+    dir.exec_self(["list"]).is_failure(50).stdout_equals(b"");
 }
 
 #[test]
