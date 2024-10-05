@@ -18,6 +18,7 @@ use crate::{arguments::Mode, errors::Error};
 pub async fn process_file(
     semaphore: &Semaphore,
     placeholder: &OsStr,
+    cwd: &Path,
     path: PathBuf,
     contents: Vec<u8>,
     format_commands: &[OsString],
@@ -26,6 +27,7 @@ pub async fn process_file(
     let result = _process_file(
         semaphore,
         placeholder,
+        cwd,
         &path,
         contents,
         format_commands,
@@ -39,6 +41,7 @@ pub async fn process_file(
 async fn _process_file(
     semaphore: &Semaphore,
     placeholder: &OsStr,
+    cwd: &Path,
     path: &Path,
     contents: Vec<u8>,
     format_commands: &[OsString],
@@ -53,7 +56,13 @@ async fn _process_file(
     let checks = FuturesUnordered::new();
 
     for command in validate_commands {
-        checks.push(process_validation(placeholder, path, &contents, command));
+        checks.push(process_validation(
+            placeholder,
+            cwd,
+            path,
+            &contents,
+            command,
+        ));
     }
 
     let errors: Vec<_> = checks
@@ -87,12 +96,14 @@ async fn process_formatting(
 
 async fn process_validation(
     placeholder: &OsStr,
+    cwd: &Path,
     path: &Path,
     contents: &[u8],
     command: &Mode,
 ) -> Result<(), CheckError> {
     let mut child = Command::new("sh");
     child
+        .current_dir(cwd)
         .arg("-c")
         .arg(command.command(placeholder, path))
         .stdin(Stdio::piped())

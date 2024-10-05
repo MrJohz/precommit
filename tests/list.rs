@@ -2,14 +2,14 @@ mod common;
 
 #[test]
 fn listing_contents_of_a_non_git_project_produces_an_error() {
-    let dir = common::dir();
+    let (_handle, dir) = common::dir();
 
     dir.exec_self(["list"]).is_failure(50).stdout_equals(b"");
 }
 
 #[test]
 fn listing_contents_of_an_empty_project_produces_no_output() {
-    let dir = common::dir();
+    let (_handle, dir) = common::dir();
 
     dir.git_init();
     dir.exec_self(["list"])
@@ -20,7 +20,7 @@ fn listing_contents_of_an_empty_project_produces_no_output() {
 
 #[test]
 fn listing_contents_of_a_project_with_no_commits_and_unstaged_files_produces_no_output() {
-    let dir = common::dir();
+    let (_handle, dir) = common::dir();
 
     dir.git_init();
     dir.file("test", "assorted file contents");
@@ -30,7 +30,7 @@ fn listing_contents_of_a_project_with_no_commits_and_unstaged_files_produces_no_
 
 #[test]
 fn listing_contents_of_a_project_with_no_commits_and_staged_files_lists_only_staged_files() {
-    let dir = common::dir();
+    let (_handle, dir) = common::dir();
 
     dir.git_init();
     dir.file("test", "assorted file contents");
@@ -44,7 +44,7 @@ fn listing_contents_of_a_project_with_no_commits_and_staged_files_lists_only_sta
 
 #[test]
 fn lists_all_files_even_from_files_in_deep_folders() {
-    let dir = common::dir();
+    let (_handle, dir) = common::dir();
 
     dir.git_init();
 
@@ -60,7 +60,7 @@ fn lists_all_files_even_from_files_in_deep_folders() {
 
 #[test]
 fn files_added_before_a_commit_are_not_listed() {
-    let dir = common::dir();
+    let (_handle, dir) = common::dir();
 
     dir.git_init();
 
@@ -76,7 +76,7 @@ fn files_added_before_a_commit_are_not_listed() {
 
 #[test]
 fn files_added_after_a_commit_are_listed() {
-    let dir = common::dir();
+    let (_handle, dir) = common::dir();
 
     dir.git_init();
 

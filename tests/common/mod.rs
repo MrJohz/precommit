@@ -1,10 +1,14 @@
+#![allow(dead_code)]
+
 use std::{
     env,
+    fmt::Debug,
     fs::{create_dir_all, File},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
 };
 
+use bstr::ByteSlice;
 use git2::{Signature, Time};
 use tempfile::TempDir;
 
@@ -78,6 +82,15 @@ impl Expectations {
         self.debug_output();
         panic!("assertion failed (stderr did not match)");
     }
+
+    pub fn stderr_contains(&self, stderr: impl AsRef<[u8]> + Debug) -> &Self {
+        if self.stderr.contains_str(stderr.as_ref()) {
+            return self;
+        }
+
+        self.debug_output();
+        panic!("assertion failed (stderr did not contain {stderr:?}")
+    }
 }
 
 pub fn exe() -> PathBuf {
@@ -96,14 +109,15 @@ pub fn exe() -> PathBuf {
         .join(EXE_NAME)
 }
 
-pub fn dir() -> Dir {
+pub fn dir() -> (TempDir, Dir) {
     let dir = TempDir::new().expect("Could not create temp dir");
+    let path = dir.path().into();
 
-    Dir { dir }
+    (dir, Dir { path })
 }
 
 pub struct Dir {
-    dir: TempDir,
+    path: PathBuf,
 }
 
 impl Dir {
@@ -115,7 +129,7 @@ impl Dir {
         let action = precommit::parse_args(args);
         let stdout = Vec::new();
         let stderr = Vec::new();
-        let mut world = precommit::World::new(self.dir.path().into(), stdout, stderr);
+        let mut world = precommit::World::new(self.path.clone(), stdout, stderr);
         let code = precommit::run(action, &mut world);
 
         let (stdout, stderr) = world.outputs();
@@ -128,20 +142,20 @@ impl Dir {
     }
 
     pub fn git_init(&self) {
-        git2::Repository::init(&self.dir).expect("could not init repository");
+        git2::Repository::init(&self.path).expect("could not init repository");
     }
 
     pub fn git_add(&self, path: impl AsRef<Path>) {
         let path = path.as_ref();
 
-        let repo = git2::Repository::open(&self.dir).expect("could not open repository");
+        let repo = git2::Repository::open(&self.path).expect("could not open repository");
         let mut index = repo.index().expect("could not fetch index");
         index.add_path(path).expect("could not add file");
         index.write().expect("could not write index")
     }
 
     pub fn git_commit(&self) {
-        let repo = git2::Repository::open(&self.dir).expect("could not open repository");
+        let repo = git2::Repository::open(&self.path).expect("could not open repository");
 
         let now = Time::new(1728076698, 0);
         let signature = Signature::new("dummy test", "test@test.test", &now)
@@ -174,8 +188,15 @@ impl Dir {
         result.expect("could not commit files");
     }
 
+    pub fn subdir(&self, path: impl AsRef<Path>) -> Self {
+        let subdir = self.path.join(path.as_ref());
+        create_dir_all(&subdir).expect("could not create parent directory for path");
+
+        Self { path: subdir }
+    }
+
     pub fn file(&self, path: impl AsRef<Path>, contents: impl Into<Vec<u8>>) {
-        let path = self.dir.path().join(path.as_ref());
+        let path = self.path.join(path.as_ref());
         if let Some(path) = path.parent() {
             create_dir_all(path).expect("could not create parent directory for path");
         }
@@ -184,5 +205,19 @@ impl Dir {
             .expect("could not create file")
             .write_all(&contents.into())
             .expect("could not write file contents to file");
+    }
+
+    pub fn read(&self, path: impl AsRef<Path>) -> String {
+        let path = self.path.join(path.as_ref());
+        let mut buf = String::new();
+        File::open(path)
+            .expect("could not open file")
+            .read_to_string(&mut buf)
+            .expect("could not read fie contents");
+        buf
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 }

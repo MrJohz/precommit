@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use futures::{stream::FuturesUnordered, StreamExt};
-use git2::Repository;
+use git2::{Repository, RepositoryOpenFlags};
 use smol::lock::Semaphore;
 
 use crate::{
@@ -38,7 +38,15 @@ pub fn run(action: Action, world: &mut World<impl Write, impl Write>) -> i32 {
 }
 
 fn try_run(action: Action, world: &mut World<impl Write, impl Write>) -> Result<(), Error> {
-    let repo = Repository::open(&world.cwd)?;
+    let repo = Repository::open_ext(
+        &world.cwd,
+        RepositoryOpenFlags::empty(),
+        &[] as &[&std::ffi::OsStr],
+    )?;
+
+    if let Some(path) = repo.workdir() {
+        world.cwd = path.into();
+    }
 
     match action {
         Action::ListFiles(()) => {
@@ -59,6 +67,7 @@ fn run_check(
     repo: &Repository,
     world: &mut World<impl Write, impl Write>,
 ) -> Result<(), Error> {
+    let cwd = world.cwd.clone();
     let files = fetch_changed_paths(repo, world)?
         .into_iter()
         .map(|(path, oid)| (path, read_oid(repo, oid, world)));
@@ -72,6 +81,7 @@ fn run_check(
             futures.push(process_file(
                 &semaphore,
                 &check.placeholder,
+                &cwd,
                 path,
                 contents?,
                 &check.format_commands,
