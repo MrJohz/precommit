@@ -85,7 +85,7 @@ fn run_check(check: Check, repo: &Repo<impl World>, world: &impl World) -> Resul
                     Ok(()) => {}
                     Err(errors) => {
                         failures += 1;
-                        world.error(format_args!("check(s) failed for path {path:?}"))?;
+                        world.check_failed(format_args!("check(s) failed for path {path:?}"))?;
                         for error in errors {
                             error.write_error_message(world)?;
                         }

@@ -8,6 +8,8 @@ pub trait World: Clone {
 
     fn output(&self, bytes: &[u8]) -> Result<(), Error>;
 
+    fn check_failed_info(&self, args: Arguments) -> Result<(), Error>;
+    fn check_failed(&self, args: Arguments) -> Result<(), Error>;
     fn warning(&self, args: Arguments) -> Result<(), Error>;
     fn error(&self, args: Arguments) -> Result<(), Error>;
 
@@ -72,13 +74,33 @@ where
 
     #[inline]
     fn warning(&self, args: Arguments) -> Result<(), Error> {
+        self.stderr.borrow_mut().write_all(b"\x1b[0;1;33m")?;
         self.stderr.borrow_mut().write_fmt(args)?;
+        self.stderr.borrow_mut().write_all(b"\x1b[0m\n")?;
         Ok(())
     }
 
     #[inline]
     fn error(&self, args: Arguments) -> Result<(), Error> {
+        self.stderr.borrow_mut().write_all(b"\x1b[0;1;31m")?;
         self.stderr.borrow_mut().write_fmt(args)?;
+        self.stderr.borrow_mut().write_all(b"\x1b[0m\n")?;
+        Ok(())
+    }
+
+    #[inline]
+    fn check_failed(&self, args: Arguments) -> Result<(), Error> {
+        self.stderr.borrow_mut().write_all(b"\x1b[0;31m")?;
+        self.stderr.borrow_mut().write_fmt(args)?;
+        self.stderr.borrow_mut().write_all(b"\x1b[0m\n")?;
+        Ok(())
+    }
+
+    #[inline]
+    fn check_failed_info(&self, args: Arguments) -> Result<(), Error> {
+        self.stderr.borrow_mut().write_all(b"\x1b[0;33m > ")?;
+        self.stderr.borrow_mut().write_fmt(args)?;
+        self.stderr.borrow_mut().write_all(b"\x1b[0m\n")?;
         Ok(())
     }
 }

@@ -15,6 +15,31 @@ use thiserror::Error;
 
 use crate::{arguments::Mode, errors::Error, World};
 
+// pub struct Processor<'a> {
+//     semaphore: Semaphore,
+//     placeholder: &'a OsStr,
+//     cwd: &'a Path,
+// }
+
+// impl<'a> Processor<'a> {
+//     pub fn new(semaphore: Semaphore, placeholder: &'a OsStr, cwd: &'a Path) -> Self {
+//         Self {
+//             semaphore,
+//             placeholder,
+//             cwd,
+//         }
+//     }
+
+//     pub async fn process(
+//         path: PathBuf,
+//         contents: Vec<u8>,
+//         format_commands: &[OsString],
+//         validate_commands: &[Mode],
+//     ) -> (PathBuf, Result<(), Vec<CheckError>>) {
+
+//     }
+// }
+
 pub async fn process_file(
     semaphore: &Semaphore,
     placeholder: &OsStr,
@@ -102,10 +127,11 @@ async fn process_validation(
     command: &Mode,
 ) -> Result<(), CheckError> {
     let mut child = Command::new("sh");
+    let cmd_bytes = command.command(placeholder, path);
     child
         .current_dir(cwd)
         .arg("-c")
-        .arg(command.command(placeholder, path))
+        .arg(&cmd_bytes)
         .stdin(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -122,12 +148,12 @@ async fn process_validation(
         Mode::Status(_) => {
             let (write, result) = join!(write_stdin(stdin, contents), child.output());
             write?;
-            status_success(result.map_err(CheckError::SpawnError)?)
+            status_success(cmd_bytes, result.map_err(CheckError::SpawnError)?)
         }
         Mode::Diff(_) => {
             let (write, result) = join!(write_stdin(stdin, contents), child.output());
             write?;
-            diff_success(result.map_err(CheckError::SpawnError)?, contents)
+            diff_success(cmd_bytes, result.map_err(CheckError::SpawnError)?, contents)
         }
     }
 }
@@ -141,19 +167,30 @@ async fn write_stdin(mut stdin: ChildStdin, contents: &[u8]) -> Result<(), Check
         .map_err(CheckError::PipeIoError)
 }
 
-fn status_success(output: Output) -> Result<(), CheckError> {
+fn status_success(command: OsString, output: Output) -> Result<(), CheckError> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(CheckError::StatusFailure(output.status, output.stderr))
+        Err(CheckError::StatusFailure {
+            command,
+            status: output.status,
+            output: output.stderr,
+        })
     }
 }
 
-fn diff_success(output: Output, expected: &[u8]) -> Result<(), CheckError> {
+fn diff_success(command: OsString, output: Output, expected: &[u8]) -> Result<(), CheckError> {
     if !output.status.success() {
-        Err(CheckError::StatusFailure(output.status, output.stderr))
+        Err(CheckError::StatusFailure {
+            status: output.status,
+            command,
+            output: output.stderr,
+        })
     } else if output.stdout != expected {
-        Err(CheckError::DiffCheckFailure(output.stderr))
+        Err(CheckError::DiffCheckFailure {
+            command,
+            output: output.stderr,
+        })
     } else {
         Ok(())
     }
@@ -167,32 +204,48 @@ pub enum CheckError {
     #[error("spawning a child process failed")]
     SpawnError(#[source] io::Error),
 
-    #[error("command failed ({0})")]
-    StatusFailure(ExitStatus, Vec<u8>),
+    #[error("command failed ({status})")]
+    StatusFailure {
+        status: ExitStatus,
+        command: OsString,
+        output: Vec<u8>,
+    },
 
     #[error("command produced mismatching output")]
-    DiffCheckFailure(Vec<u8>),
+    DiffCheckFailure { command: OsString, output: Vec<u8> },
 }
 
 impl CheckError {
     pub fn write_error_message(&self, world: &impl World) -> Result<(), Error> {
         match &self {
             Self::PipeIoError(source) => {
-                world.warning(format_args!(
+                world.check_failed_info(format_args!(
                     "writing to/from a child process failed ({source})"
                 ))?;
             }
             Self::SpawnError(source) => {
-                world.warning(format_args!("spawning a child process failed ({source})"))?;
+                world.check_failed_info(format_args!(
+                    "spawning a child process failed ({source})"
+                ))?;
             }
-            Self::StatusFailure(status, output) => {
-                world.warning(format_args!("command failed ({status})"))?;
+            Self::StatusFailure {
+                command,
+                status,
+                output,
+            } => {
+                world.check_failed_info(format_args!(
+                    "command failed `{command}` ({status})",
+                    command = command.to_string_lossy()
+                ))?;
                 if !output.is_empty() {
                     world.stderr_raw_bytes(output)?;
                 }
             }
-            Self::DiffCheckFailure(output) => {
-                world.warning(format_args!("command output did not match expected source"))?;
+            Self::DiffCheckFailure { command, output } => {
+                world.check_failed_info(format_args!(
+                    "command output did not match expected source `{command}`",
+                    command = command.to_string_lossy()
+                ))?;
                 if !output.is_empty() {
                     world.stderr_raw_bytes(output)?;
                 }
