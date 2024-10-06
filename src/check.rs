@@ -1,6 +1,6 @@
 use std::{
     ffi::{OsStr, OsString},
-    io::{self, Write},
+    io,
     path::{Path, PathBuf},
     process::{ExitStatus, Output, Stdio},
 };
@@ -13,7 +13,7 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::{arguments::Mode, errors::Error};
+use crate::{arguments::Mode, errors::Error, World};
 
 pub async fn process_file(
     semaphore: &Semaphore,
@@ -175,24 +175,26 @@ pub enum CheckError {
 }
 
 impl CheckError {
-    pub fn write_error_message(&self, stderr: &mut impl Write) -> Result<(), Error> {
+    pub fn write_error_message(&self, world: &impl World) -> Result<(), Error> {
         match &self {
             Self::PipeIoError(source) => {
-                writeln!(stderr, "writing to/from a child process failed ({source})")?
+                world.warning(format_args!(
+                    "writing to/from a child process failed ({source})"
+                ))?;
             }
             Self::SpawnError(source) => {
-                writeln!(stderr, "spawning a child process failed ({source})")?
+                world.warning(format_args!("spawning a child process failed ({source})"))?;
             }
             Self::StatusFailure(status, output) => {
-                writeln!(stderr, "command failed ({status})")?;
+                world.warning(format_args!("command failed ({status})"))?;
                 if !output.is_empty() {
-                    stderr.write_all(output)?;
+                    world.stderr_raw_bytes(output)?;
                 }
             }
             Self::DiffCheckFailure(output) => {
-                writeln!(stderr, "command produced mismatching output")?;
+                world.warning(format_args!("command output did not match expected source"))?;
                 if !output.is_empty() {
-                    stderr.write_all(output)?;
+                    world.stderr_raw_bytes(output)?;
                 }
             }
         }

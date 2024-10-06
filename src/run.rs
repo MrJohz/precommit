@@ -1,63 +1,53 @@
-use std::io::Write;
+use std::path::Path;
 
 use futures::{stream::FuturesUnordered, StreamExt};
-use git2::{Repository, RepositoryOpenFlags};
 use smol::lock::Semaphore;
 
 use crate::{
     arguments::{Action, Check},
     check::process_file,
     errors::Error,
-    repo::{fetch_changed_paths, read_oid},
+    repo::Repo,
     world::World,
 };
 
-pub fn run(action: Action, world: &mut World<impl Write, impl Write>) -> i32 {
-    match try_run(action, world) {
+pub fn run(cwd: &Path, action: Action, world: &impl World) -> i32 {
+    match try_run(cwd, action, world) {
         Ok(_) => 0,
         Err(Error::Git(error)) => {
-            writeln!(
-                world.stderr,
-                "An git operation failed unexpectedly (class {2:?}, code {1:?}): {0} ",
-                error.message(),
-                error.code(),
-                error.class()
-            )
-            .unwrap();
+            world
+                .error(format_args!(
+                    "A git operation failed unexpectedly (class {2:?}, code {1:?}): {0}",
+                    error.message(),
+                    error.code(),
+                    error.class()
+                ))
+                .unwrap();
             50
         }
         Err(Error::Write(error)) => {
-            writeln!(world.stderr, "Unable to perform IO: {:?}", error).unwrap();
+            world
+                .error(format_args!("Unable to perform IO: {:?}", error))
+                .unwrap();
             51
         }
         Err(Error::ChecksFailed()) => {
-            writeln!(world.stderr, "One or more checks failed").unwrap();
+            world
+                .error(format_args!("One or more checks failed"))
+                .unwrap();
             1
         }
     }
 }
 
-fn try_run(action: Action, world: &mut World<impl Write, impl Write>) -> Result<(), Error> {
-    let repo = Repository::open_ext(
-        &world.cwd,
-        RepositoryOpenFlags::empty(),
-        &[] as &[&std::ffi::OsStr],
-    )?;
-
-    // Open closest repository to the cwd, which may not actually be the cwd
-    // (e.g. if we are in a subdirectory of the repository).  In this case,
-    // update `world.cwd` as if we were running in the repository root.
-    if let Some(path) = repo.workdir() {
-        world.cwd = path.into();
-    }
+fn try_run(cwd: &Path, action: Action, world: &impl World) -> Result<(), Error> {
+    let repo = Repo::new(cwd, world.clone())?;
 
     match action {
         Action::ListFiles(()) => {
-            for file in fetch_changed_paths(&repo, world)? {
-                world
-                    .stdout
-                    .write_all(file.0.as_os_str().as_encoded_bytes())?;
-                writeln!(world.stdout)?;
+            for file in repo.fetch_changed_paths()? {
+                world.output(file.0.as_os_str().as_encoded_bytes())?;
+                world.output(b"\n")?;
             }
             Ok(())
         }
@@ -65,15 +55,11 @@ fn try_run(action: Action, world: &mut World<impl Write, impl Write>) -> Result<
     }
 }
 
-fn run_check(
-    check: Check,
-    repo: &Repository,
-    world: &mut World<impl Write, impl Write>,
-) -> Result<(), Error> {
-    let cwd = world.cwd.clone();
-    let files = fetch_changed_paths(repo, world)?
+fn run_check(check: Check, repo: &Repo<impl World>, world: &impl World) -> Result<(), Error> {
+    let files = repo
+        .fetch_changed_paths()?
         .into_iter()
-        .map(|(path, oid)| (path, read_oid(repo, oid, world)));
+        .map(|(path, oid)| (path, repo.read_oid(oid)));
 
     let semaphore = Semaphore::new(check.max_processes);
 
@@ -84,7 +70,7 @@ fn run_check(
             futures.push(process_file(
                 &semaphore,
                 &check.placeholder,
-                &cwd,
+                repo.root_dir()?,
                 path,
                 contents?,
                 &check.format_commands,
@@ -99,11 +85,11 @@ fn run_check(
                     Ok(()) => {}
                     Err(errors) => {
                         failures += 1;
-                        writeln!(world.stderr, "check(s) failed for path {path:?}")?;
+                        world.error(format_args!("check(s) failed for path {path:?}"))?;
                         for error in errors {
-                            error.write_error_message(&mut world.stderr)?;
+                            error.write_error_message(world)?;
                         }
-                        writeln!(world.stderr)?;
+                        world.stderr_raw_bytes(b"\n")?;
                     }
                 }
             }

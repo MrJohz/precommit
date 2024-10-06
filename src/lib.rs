@@ -8,6 +8,7 @@ mod world;
 pub use arguments::parse_args;
 pub use run::run;
 pub use world::World;
+pub use world::WriterWorld;
 
 // #[derive(Debug)]
 // struct BlobbedFile {

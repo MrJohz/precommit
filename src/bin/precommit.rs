@@ -8,13 +8,13 @@ fn main() {
     let status = {
         let stdout = io::stdout().lock();
         let stderr = io::stderr().lock();
-        let mut world = precommit::World::new(
-            current_dir().expect("Could not access current working directory"),
-            stdout,
-            stderr,
-        );
+        let world = precommit::WriterWorld::new(stdout, stderr);
 
-        precommit::run(action, &mut world)
+        precommit::run(
+            &current_dir().expect("Could not access current working directory"),
+            action,
+            &world,
+        )
     };
 
     process::exit(status);

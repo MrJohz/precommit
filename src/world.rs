@@ -1,30 +1,84 @@
-use std::{io::Write, path::PathBuf};
+use std::{cell::RefCell, fmt::Arguments, io::Write, rc::Rc};
 
-pub struct World<Stdout, Stderr> {
-    pub cwd: PathBuf,
-    pub stdout: Stdout,
-    pub stderr: Stderr,
+use crate::errors::Error;
+
+pub trait World: Clone {
+    type Stdout: Write;
+    type Stderr: Write;
+
+    fn output(&self, bytes: &[u8]) -> Result<(), Error>;
+
+    fn warning(&self, args: Arguments) -> Result<(), Error>;
+    fn error(&self, args: Arguments) -> Result<(), Error>;
+
+    fn stderr_raw_bytes(&self, bytes: &[u8]) -> Result<(), Error>;
 }
 
-impl<Stdout, Stderr> World<Stdout, Stderr> {
-    pub fn new(cwd: PathBuf, stdout: Stdout, stderr: Stderr) -> Self
-    where
-        Stdout: Write,
-        Stderr: Write,
-    {
+pub struct WriterWorld<Stdout, Stderr> {
+    stdout: Rc<RefCell<Stdout>>,
+    stderr: Rc<RefCell<Stderr>>,
+}
+
+impl<Stdout, Stderr> Clone for WriterWorld<Stdout, Stderr> {
+    #[inline]
+    fn clone(&self) -> Self {
         Self {
-            cwd,
-            stdout,
-            stderr,
+            stdout: self.stdout.clone(),
+            stderr: self.stderr.clone(),
         }
     }
+}
 
+impl<Stdout, Stderr> WriterWorld<Stdout, Stderr> {
+    #[inline]
+    pub fn new(stdout: Stdout, stderr: Stderr) -> Self {
+        WriterWorld {
+            stdout: Rc::new(RefCell::new(stdout)),
+            stderr: Rc::new(RefCell::new(stderr)),
+        }
+    }
+}
+
+impl<Stdout: Clone, Stderr: Clone> WriterWorld<Stdout, Stderr> {
     pub fn outputs(self) -> (Stdout, Stderr) {
-        let Self {
-            cwd: _,
-            stdout,
-            stderr,
-        } = self;
-        (stdout, stderr)
+        let WriterWorld { stdout, stderr } = self;
+        (
+            <std::cell::RefCell<Stdout> as Clone>::clone(&stdout).into_inner(),
+            <std::cell::RefCell<Stderr> as Clone>::clone(&stderr).into_inner(),
+        )
+    }
+}
+
+impl<Stdout, Stderr> World for WriterWorld<Stdout, Stderr>
+where
+    Stdout: Write,
+    Stderr: Write,
+    WriterWorld<Stdout, Stderr>: Clone,
+{
+    type Stdout = Stdout;
+    type Stderr = Stderr;
+
+    #[inline]
+    fn output(&self, bytes: &[u8]) -> Result<(), Error> {
+        self.stdout.borrow_mut().write_all(bytes)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn stderr_raw_bytes(&self, bytes: &[u8]) -> Result<(), Error> {
+        self.stderr.borrow_mut().write_all(bytes)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn warning(&self, args: Arguments) -> Result<(), Error> {
+        self.stderr.borrow_mut().write_fmt(args)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn error(&self, args: Arguments) -> Result<(), Error> {
+        self.stderr.borrow_mut().write_fmt(args)?;
+        Ok(())
     }
 }

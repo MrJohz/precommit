@@ -10,6 +10,7 @@ use std::{
 
 use bstr::ByteSlice;
 use git2::{Signature, Time};
+use precommit::WriterWorld;
 use tempfile::TempDir;
 
 static EXE_NAME: &str = "precommit";
@@ -138,8 +139,8 @@ impl Dir {
         let action = precommit::parse_args(args);
         let stdout = Vec::new();
         let stderr = Vec::new();
-        let mut world = precommit::World::new(self.path.clone(), stdout, stderr);
-        let code = precommit::run(action, &mut world);
+        let world = WriterWorld::new(stdout, stderr);
+        let code = precommit::run(&self.path, action, &world);
 
         let (stdout, stderr) = world.outputs();
 
