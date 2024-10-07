@@ -5,7 +5,7 @@ use smol::lock::Semaphore;
 
 use crate::{
     arguments::{Action, Check},
-    check::process_file,
+    check::Processor,
     errors::Error,
     repo::Repo,
     world::World,
@@ -64,37 +64,34 @@ fn run_check(check: Check, repo: &Repo<impl World>, world: &impl World) -> Resul
     let semaphore = Semaphore::new(check.max_processes);
 
     let failures = {
+        let mut failures = 0;
+        let processor = Processor::new(semaphore, &check.placeholder, repo.root_dir()?, world);
         let mut futures = FuturesUnordered::new();
 
         for (path, contents) in files {
-            futures.push(process_file(
-                &semaphore,
-                &check.placeholder,
-                repo.root_dir()?,
-                path,
-                contents?,
-                &check.format_commands,
-                &check.validate_commands,
-            ));
+            let contents = match contents {
+                Ok(contents) => contents,
+                Err(_) => {
+                    world.check_failed(format_args!("Could not read file for {path:?}"))?;
+                    failures += 1;
+                    continue;
+                }
+            };
+
+            futures.push(processor.process(path, contents, &check.validate_commands));
         }
 
-        let mut failures = 0;
-        smol::block_on(async {
-            while let Some((path, result)) = futures.next().await {
+        failures += smol::block_on(async move {
+            let mut failures = 0;
+            while let Some(result) = futures.next().await {
                 match result {
-                    Ok(()) => {}
-                    Err(errors) => {
-                        failures += 1;
-                        world.check_failed(format_args!("check(s) failed for path {path:?}"))?;
-                        for error in errors {
-                            error.write_error_message(world)?;
-                        }
-                        world.stderr_raw_bytes(b"\n")?;
-                    }
+                    Ok(true) => {}
+                    Ok(false) => failures += 1,
+                    Err(_) => failures += 1,
                 }
             }
-            Ok::<_, Error>(())
-        })?;
+            failures
+        });
 
         Ok::<_, Error>(failures)
     }?;

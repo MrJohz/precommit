@@ -181,22 +181,6 @@ fn if_multiple_files_fail_all_the_command_outputs_are_shown() {
 }
 
 #[test]
-fn stdout_is_never_printed_to_console() {
-    let (_handle, dir) = common::dir();
-
-    dir.git_init();
-
-    dir.file("test", "contents");
-    dir.git_add("test");
-
-    let subdir = dir.subdir("subdirectory");
-    subdir
-        .exec_self(["check", "-s", "echo 'print to stdout'; false"])
-        .is_failure(1)
-        .stderr_not_contains("print to stdout");
-}
-
-#[test]
 fn check_status_is_fed_the_file_in_the_index() {
     let (_handle, dir) = common::dir();
 

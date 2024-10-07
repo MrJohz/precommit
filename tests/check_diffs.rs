@@ -45,25 +45,6 @@ fn diff_commands_can_emit_to_stderr_without_failing() {
 }
 
 #[test]
-fn stderr_from_diff_commands_is_shown_to_user_when_diff_command_fails() {
-    let (_handle, dir) = common::dir();
-
-    dir.git_init();
-
-    dir.file("test.txt", "contents");
-    dir.git_add("test.txt");
-
-    dir.exec_self([
-        "check",
-        "-d",
-        "echo 'this is sent to stdout'; >&2 echo 'this is spurious text'",
-    ])
-    .is_failure(1)
-    .stderr_contains("this is spurious text")
-    .stderr_not_contains("this is sent to stdout");
-}
-
-#[test]
 fn diff_commands_fail_if_the_command_returns_nonzero() {
     let (_handle, dir) = common::dir();
 

@@ -1,9 +1,4 @@
-use std::{
-    ffi::{OsStr, OsString},
-    num::NonZero,
-    path::Path,
-    thread,
-};
+use std::{ffi::OsString, num::NonZero, thread};
 
 #[derive(Debug)]
 pub enum Action {
@@ -15,34 +10,13 @@ pub enum Action {
 pub struct Check {
     pub max_processes: usize,
     pub placeholder: OsString,
-    pub validate_commands: Vec<Mode>,
-    pub format_commands: Vec<OsString>,
+    pub validate_commands: Vec<(OsString, CommandKind)>,
 }
 
-#[derive(Debug)]
-pub enum Mode {
-    Status(OsString),
-    Diff(OsString),
-}
-
-impl Mode {
-    pub fn command(&self, placeholder: &OsStr, path: &Path) -> OsString {
-        use bstr::ByteSlice;
-        // TODO: make this work for Windows as well
-        use std::os::unix::ffi::OsStringExt;
-
-        let command = match self {
-            Self::Status(command) => command,
-            Self::Diff(command) => command,
-        };
-
-        let command = command.as_encoded_bytes().replace(
-            placeholder.as_encoded_bytes(),
-            path.as_os_str().as_encoded_bytes(),
-        );
-
-        OsString::from_vec(command)
-    }
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum CommandKind {
+    Status,
+    Diff,
 }
 
 fn try_parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Action, lexopt::Error> {
@@ -75,20 +49,16 @@ fn parse_check(parser: &mut lexopt::Parser) -> Result<Check, lexopt::Error> {
         .unwrap_or(1);
     let mut placeholder = OsString::from("{}");
     let mut validate_commands = Vec::new();
-    let mut format_commands = Vec::new();
 
     while let Some(arg) = parser.next()? {
         match arg {
             Short('j') | Long("jobs") => max_processes = parser.value()?.parse()?,
             Short('I') => placeholder = parser.value()?,
             Short('s') | Long("status") => {
-                validate_commands.push(Mode::Status(parser.value()?));
+                validate_commands.push((parser.value()?, CommandKind::Status));
             }
             Short('d') | Long("diff") => {
-                validate_commands.push(Mode::Diff(parser.value()?));
-            }
-            Short('f') | Long("format") => {
-                format_commands.push(parser.value()?);
+                validate_commands.push((parser.value()?, CommandKind::Diff));
             }
             _ => return Err(arg.unexpected()),
         }
@@ -98,7 +68,6 @@ fn parse_check(parser: &mut lexopt::Parser) -> Result<Check, lexopt::Error> {
         max_processes,
         placeholder,
         validate_commands,
-        format_commands,
     })
 }
 

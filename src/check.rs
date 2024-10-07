@@ -13,149 +13,128 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::{arguments::Mode, errors::Error, World};
+use crate::{arguments::CommandKind, errors::Error, World};
 
-// pub struct Processor<'a> {
-//     semaphore: Semaphore,
-//     placeholder: &'a OsStr,
-//     cwd: &'a Path,
-// }
-
-// impl<'a> Processor<'a> {
-//     pub fn new(semaphore: Semaphore, placeholder: &'a OsStr, cwd: &'a Path) -> Self {
-//         Self {
-//             semaphore,
-//             placeholder,
-//             cwd,
-//         }
-//     }
-
-//     pub async fn process(
-//         path: PathBuf,
-//         contents: Vec<u8>,
-//         format_commands: &[OsString],
-//         validate_commands: &[Mode],
-//     ) -> (PathBuf, Result<(), Vec<CheckError>>) {
-
-//     }
-// }
-
-pub async fn process_file(
-    semaphore: &Semaphore,
-    placeholder: &OsStr,
-    cwd: &Path,
-    path: PathBuf,
-    contents: Vec<u8>,
-    format_commands: &[OsString],
-    validate_commands: &[Mode],
-) -> (PathBuf, Result<(), Vec<CheckError>>) {
-    let result = _process_file(
-        semaphore,
-        placeholder,
-        cwd,
-        &path,
-        contents,
-        format_commands,
-        validate_commands,
-    )
-    .await;
-
-    (path, result)
+pub struct Processor<'a, W: World> {
+    semaphore: Semaphore,
+    placeholder: &'a OsStr,
+    cwd: &'a Path,
+    world: &'a W,
 }
 
-async fn _process_file(
-    semaphore: &Semaphore,
-    placeholder: &OsStr,
-    cwd: &Path,
-    path: &Path,
-    contents: Vec<u8>,
-    format_commands: &[OsString],
-    validate_commands: &[Mode],
-) -> Result<(), Vec<CheckError>> {
-    let _lock = semaphore.acquire().await;
-
-    let contents = process_formatting(path, contents, format_commands)
-        .await
-        .map_err(|err| vec![err])?;
-
-    let checks = FuturesUnordered::new();
-
-    for command in validate_commands {
-        checks.push(process_validation(
+impl<'a, W: World> Processor<'a, W> {
+    pub fn new(semaphore: Semaphore, placeholder: &'a OsStr, cwd: &'a Path, world: &'a W) -> Self {
+        Self {
+            semaphore,
             placeholder,
             cwd,
-            path,
-            &contents,
-            command,
-        ));
+            world,
+        }
     }
 
-    let errors: Vec<_> = checks
-        .filter_map(|check| async {
-            match check {
-                Ok(()) => None,
-                Err(err) => Some(err),
+    pub async fn process(
+        &'a self,
+        path: PathBuf,
+        contents: Vec<u8>,
+        commands: &'a [(OsString, CommandKind)],
+    ) -> Result<bool, Error> {
+        let checks = FuturesUnordered::new();
+
+        for (command, kind) in commands {
+            checks.push(self.run_check(command, kind, &path, &contents));
+        }
+
+        let errors: Vec<_> = checks
+            .filter_map(|check| async {
+                match check {
+                    Ok(()) => None,
+                    Err(err) => Some(err),
+                }
+            })
+            .collect()
+            .await;
+
+        if errors.is_empty() {
+            Ok(true)
+        } else {
+            self.world
+                .check_failed(format_args!("check(s) failed for path {path:?}"))?;
+            for error in errors {
+                error.write_error_message(self.world)?;
             }
-        })
-        .collect()
-        .await;
+            self.world.stderr_raw_bytes(b"\n")?;
+            Ok(false)
+        }
+    }
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
+    async fn run_check(
+        &self,
+        command: &OsStr,
+        kind: &CommandKind,
+        path: &Path,
+        contents: &[u8],
+    ) -> Result<(), CheckError> {
+        let _guard = self.semaphore.acquire().await;
+
+        let command = expand_command_string(command, self.placeholder, path);
+        let output = self.run_command(&command, kind, contents).await?;
+
+        match kind {
+            _ if !output.status.success() => Err(CheckError::StatusFailure {
+                command,
+                status: output.status,
+                output: output.stderr,
+            }),
+            CommandKind::Diff if output.stdout != contents => Err(CheckError::DiffCheckFailure {
+                command,
+                output: output.stderr,
+            }),
+            _ => Ok(()),
+        }
+    }
+
+    async fn run_command(
+        &self,
+        command: &OsStr,
+        kind: &CommandKind,
+        contents: &[u8],
+    ) -> Result<Output, CheckError> {
+        let mut child = Command::new("sh");
+        child
+            .current_dir(self.cwd)
+            .arg("-c")
+            .arg(command)
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        match kind {
+            CommandKind::Diff => child.stdout(Stdio::piped()),
+            CommandKind::Status => child.stdout(Stdio::null()),
+        };
+
+        let mut child = child.spawn().map_err(CheckError::SpawnError)?;
+        let stdin = child.stdin.take().expect("stdin is not a pipe");
+
+        let (write, output) = join!(write_stdin(stdin, contents), child.output());
+
+        write?;
+        let output = output.map_err(CheckError::PipeIoError)?;
+
+        Ok(output)
     }
 }
 
-async fn process_formatting(
-    _path: &Path,
-    contents: Vec<u8>,
-    format_commands: &[OsString],
-) -> Result<Vec<u8>, CheckError> {
-    if format_commands.is_empty() {
-        return Ok(contents);
-    }
+fn expand_command_string(command: &OsStr, placeholder: &OsStr, path: &Path) -> OsString {
+    use bstr::ByteSlice;
+    // TODO: make this work for Windows as well
+    use std::os::unix::ffi::OsStringExt;
 
-    unimplemented!("implement formatting");
-}
+    let command = command.as_encoded_bytes().replace(
+        placeholder.as_encoded_bytes(),
+        path.as_os_str().as_encoded_bytes(),
+    );
 
-async fn process_validation(
-    placeholder: &OsStr,
-    cwd: &Path,
-    path: &Path,
-    contents: &[u8],
-    command: &Mode,
-) -> Result<(), CheckError> {
-    let mut child = Command::new("sh");
-    let cmd_bytes = command.command(placeholder, path);
-    child
-        .current_dir(cwd)
-        .arg("-c")
-        .arg(&cmd_bytes)
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    if matches!(command, Mode::Diff(_)) {
-        child.stdout(Stdio::piped());
-    } else {
-        child.stdout(Stdio::null());
-    }
-
-    let mut child = child.spawn().map_err(CheckError::SpawnError)?;
-    let stdin = child.stdin.take().expect("stdin is not a pipe");
-
-    match command {
-        Mode::Status(_) => {
-            let (write, result) = join!(write_stdin(stdin, contents), child.output());
-            write?;
-            status_success(cmd_bytes, result.map_err(CheckError::SpawnError)?)
-        }
-        Mode::Diff(_) => {
-            let (write, result) = join!(write_stdin(stdin, contents), child.output());
-            write?;
-            diff_success(cmd_bytes, result.map_err(CheckError::SpawnError)?, contents)
-        }
-    }
+    OsString::from_vec(command)
 }
 
 async fn write_stdin(mut stdin: ChildStdin, contents: &[u8]) -> Result<(), CheckError> {
@@ -165,35 +144,6 @@ async fn write_stdin(mut stdin: ChildStdin, contents: &[u8]) -> Result<(), Check
         .write_all(contents)
         .await
         .map_err(CheckError::PipeIoError)
-}
-
-fn status_success(command: OsString, output: Output) -> Result<(), CheckError> {
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(CheckError::StatusFailure {
-            command,
-            status: output.status,
-            output: output.stderr,
-        })
-    }
-}
-
-fn diff_success(command: OsString, output: Output, expected: &[u8]) -> Result<(), CheckError> {
-    if !output.status.success() {
-        Err(CheckError::StatusFailure {
-            status: output.status,
-            command,
-            output: output.stderr,
-        })
-    } else if output.stdout != expected {
-        Err(CheckError::DiffCheckFailure {
-            command,
-            output: output.stderr,
-        })
-    } else {
-        Ok(())
-    }
 }
 
 #[derive(Error, Debug)]
