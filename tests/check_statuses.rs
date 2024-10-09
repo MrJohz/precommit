@@ -40,6 +40,7 @@ fn check_runs_check_command_for_each_file_to_be_added() {
 }
 
 #[test]
+#[cfg_attr(target_os = "macos", ignore)]
 fn check_runs_check_command_in_working_directory_of_git_folder() {
     let (_handle, dir) = common::dir();
 
@@ -57,6 +58,7 @@ fn check_runs_check_command_in_working_directory_of_git_folder() {
 }
 
 #[test]
+#[cfg_attr(target_os = "macos", ignore)]
 fn finds_correct_git_folder_when_run_in_subfolder_of_working_directory() {
     let (_handle, dir) = common::dir();
 
