@@ -24,6 +24,14 @@ fn try_parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Action, le
     let mut parser = lexopt::Parser::from_iter(args);
 
     match parser.next()? {
+        Some(Short('V')) | Some(Long("version")) => {
+            println!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+        Some(Short('h')) | Some(Long("help")) => {
+            print!(include_str!("../assets/help.txt"));
+            std::process::exit(0);
+        }
         Some(Value(cmd)) if cmd == "list" => Ok(Action::ListFiles(parse_list_files(&mut parser)?)),
         Some(Value(cmd)) if cmd == "check" => Ok(Action::Check(parse_check(&mut parser)?)),
         Some(Value(cmd)) => Err(format!("Unexpected command {}", cmd.to_string_lossy()))?,
@@ -75,8 +83,8 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Action {
     match try_parse_args(args) {
         Ok(args) => args,
         Err(err) => {
-            dbg!(err);
-            // TODO: help text
+            eprintln!(include_str!("../assets/help.txt"));
+            eprintln!("Error: {}", err);
             std::process::exit(1)
         }
     }

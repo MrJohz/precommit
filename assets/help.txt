@@ -1,0 +1,28 @@
+Usage:
+  precommit [OPTIONS]
+  precommit list
+  precommit check [CHECK_OPTIONS] [--status <status command>] [--diff <diff command>]
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+Commands:
+  list   List all files with staged changes
+  check  Run commands to validate the staged changes
+
+Check Options:
+  -j, --jobs <N>      Set the maximum number of parallel processes that will be
+                      spawned (defaults to the number of processors)
+  -I <PLACEHOLDER>    Any instance of the string <PLACEHOLDER> in the command string
+                      will be replaced by the filename of the staged file before the
+                      command is executed.  (defaults to '{{}}')
+  -s, --status <CMD>  Adds a command that will be run once for each file with the
+                      file's staged contents piped to STDIN.  If this command returns
+                      a non-zero status code, the validation is considered a failure.
+                      This option may be passed multiple times.
+  -d, --diff <CMD>    Adds a command that will be run once for each file with the
+                      file's staged contents piped to STDIN.  If this command returns
+                      a non-zero status code, or if the command's STDOUT does not
+                      match the file's contents, the validation is considered a
+                      failure.  This option may be passed multiple times.

@@ -4,14 +4,18 @@ A tool for running linters, formatters, and other useful tools over your code be
 
 ## Tasks
 
-- [ ] Help text and cli parsing error messages
-- [ ] Version flag
+- [x] Help text and cli parsing error messages
+- [x] Version flag
 - [ ] Remove ByteStr dependency
 - [x] Refactor `check.rs` and `run.rs` logic
 - [ ] Add colours (and enable disabling colours)
 - [ ] Convince subcommands to show colours if colours are enabled
 - [x] Figure out how to run the correct shell
 - [x] Improve formatting of stderr output in general
+- [ ] Get tests running in CI
+  - [ ] Broken pipe issues
+  - [ ] MacOS directory changes
+  - [ ] Windows ???
 - [ ] Figure out how to put this into various packages
   - [ ] Cargo/crates/binstall?
   - [ ] NPM (via GitHub releases?)
