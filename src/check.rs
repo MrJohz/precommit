@@ -1,4 +1,5 @@
 use std::{
+    env,
     ffi::{OsStr, OsString},
     io,
     path::{Path, PathBuf},
@@ -99,10 +100,9 @@ impl<'a, W: World> Processor<'a, W> {
         kind: &CommandKind,
         contents: &[u8],
     ) -> Result<Output, CheckError> {
-        let mut child = Command::new("sh");
+        let mut child = shell()?;
         child
             .current_dir(self.cwd)
-            .arg("-c")
             .arg(command)
             .stdin(Stdio::piped())
             .stderr(Stdio::piped());
@@ -117,10 +117,28 @@ impl<'a, W: World> Processor<'a, W> {
 
         let (write, output) = join!(write_stdin(stdin, contents), child.output());
 
+        let output = dbg!(output.map_err(CheckError::PipeIoError)?);
         write?;
-        let output = output.map_err(CheckError::PipeIoError)?;
 
         Ok(output)
+    }
+}
+
+fn shell() -> Result<Command, CheckError> {
+    if cfg!(windows) {
+        let shell_name = env::var_os("ComSpec")
+            .or_else(|| {
+                env::var_os("SystemRoot")
+                    .map(|root| PathBuf::from(root).join("System32").join("cmd.exe").into())
+            })
+            .ok_or(CheckError::NoShell())?;
+        let mut command = Command::new(shell_name);
+        command.arg("/c");
+        Ok(command)
+    } else {
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c");
+        Ok(command)
     }
 }
 
@@ -148,6 +166,9 @@ async fn write_stdin(mut stdin: ChildStdin, contents: &[u8]) -> Result<(), Check
 
 #[derive(Error, Debug)]
 pub enum CheckError {
+    #[error("could not find shell")]
+    NoShell(),
+
     #[error("writing to/from a child process failed")]
     PipeIoError(#[source] io::Error),
 
@@ -168,16 +189,14 @@ pub enum CheckError {
 impl CheckError {
     pub fn write_error_message(&self, world: &impl World) -> Result<(), Error> {
         match &self {
-            Self::PipeIoError(source) => {
-                world.check_failed_info(format_args!(
-                    "writing to/from a child process failed ({source})"
-                ))?;
-            }
-            Self::SpawnError(source) => {
-                world.check_failed_info(format_args!(
-                    "spawning a child process failed ({source})"
-                ))?;
-            }
+            Self::NoShell() => world.check_failed_info(format_args!(
+                "could not find a valid shell to execute command with"
+            ))?,
+            Self::PipeIoError(source) => world.check_failed_info(format_args!(
+                "writing to/from a child process failed ({source})"
+            ))?,
+            Self::SpawnError(source) => world
+                .check_failed_info(format_args!("spawning a child process failed ({source})"))?,
             Self::StatusFailure {
                 command,
                 status,
